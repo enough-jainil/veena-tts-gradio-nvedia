@@ -1,6 +1,7 @@
 torch>=2.0.0
 torchaudio>=2.0.0
 transformers>=4.35.0
+huggingface_hub[hf_xet]>=0.17.0
 gradio>=4.0.0
 snac
 bitsandbytes>=0.41.0
