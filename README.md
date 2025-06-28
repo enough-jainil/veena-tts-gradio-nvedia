@@ -16,9 +16,17 @@ A beautiful and intuitive web interface for the **Veena Text-to-Speech model** d
 
 ### Prerequisites
 
-- Python 3.8+
-- CUDA-compatible GPU (recommended for optimal performance)
-- At least 8GB GPU memory for 4-bit quantized model
+#### mainly i tested in these idk about the others so try and let me know 💖
+
+| Requirement                  | Recommended Version                                                         |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| Python                       | **3.9 – 3.12**                                                              |
+| PyTorch                      | **≥ 2.2.0** (built with CUDA 12.1)                                          |
+| CUDA Toolkit (NVIDIA driver) | **CUDA 12.1** runtime (Driver ≥ 545)                                        |
+| NVIDIA GPU                   | RTX 30-series/40-series <br> **≥ 6 GB VRAM** (≥ 12 GB strongly recommended) |
+| System RAM                   | ≥ 16 GB                                                                     |
+
+On Linux/Windows the official PyTorch wheels already include the necessary CUDA libraries – a separate toolkit install is **not** required. If you are running on a laptop GPU with <6 GB VRAM or on CPU-only hardware you can still launch the app (see the _CPU fallback_ section) but generation will be slow.
 
 ### Installation
 
@@ -86,19 +94,32 @@ The interface includes quick example buttons for:
 - **Languages**: Hindi, English with code-mixing support
 - **Latency**: Sub-80ms on H100, ~200ms on RTX 4090
 
-### System Requirements
+### Dependency Matrix
 
-**Minimum:**
+| Package                                  | Tested Version    |
+| ---------------------------------------- | ----------------- |
+| `torch`                                  | 2.2.2 + CUDA 12.1 |
+| `torchaudio`                             | 2.2.2             |
+| `transformers`                           | 4.52.4            |
+| `bitsandbytes`                           | 0.43.0            |
+| `snac`                                   | 0.1.5             |
+| `gradio`                                 | 4.27.0            |
+| `soundfile`, `numpy`, `scipy`, `librosa` | latest            |
 
-- GPU: 6GB VRAM (RTX 3060, RTX 4060)
-- RAM: 8GB system RAM
-- Storage: 10GB free space
+Install all dependencies with:
 
-**Recommended:**
+```bash
+pip install -r requirements.txt
+```
 
-- GPU: 12GB+ VRAM (RTX 4070, RTX 4080, RTX 4090)
-- RAM: 16GB+ system RAM
-- Storage: 20GB+ free space
+### GPU vs CPU behaviour
+
+The application auto-detects a CUDA-capable GPU:
+
+- **GPU available →** loads Veena in 4-bit NF4 quantisation using `bitsandbytes` (`device_map="auto"`). This is memory-efficient (≈5 GB VRAM) and fast.
+- **No GPU detected →** falls back to full-precision (FP16/FP32) _CPU_ inference. Expect **~50× slower** generation and ≈12 – 16 GB RAM usage. A warning is printed at startup.
+
+No manual switches are required – the logic is handled in `app.py`.
 
 ### Performance Notes
 
@@ -106,6 +127,8 @@ The interface includes quick example buttons for:
 - Initial model loading takes 30-60 seconds
 - Subsequent generations are much faster
 - GPU required for reasonable performance
+
+**🔬 Tested configuration:** Windows 11 (22H2) • Python 3.10 • NVIDIA RTX 3070 Laptop GPU (8 GB VRAM) • Driver 546.xx • CUDA 12.1 wheels. Other comparable Ampere/ADA GPUs should behave similarly.
 
 ### Troubleshooting
 

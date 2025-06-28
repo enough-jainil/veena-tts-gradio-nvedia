@@ -38,27 +38,37 @@ def load_models():
     if model is None:
         print("Loading Veena TTS model...")
         
-        # Model configuration for 4-bit inference
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-        
-        # Load model and tokenizer
-        model = AutoModelForCausalLM.from_pretrained(
-            "maya-research/Veena",
-            quantization_config=quantization_config,
-            device_map="auto",
-            trust_remote_code=True,
-        )
+        has_gpu = torch.cuda.is_available()
+
+        if has_gpu:
+            # Model configuration for fast 4-bit GPU inference
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+
+            model = AutoModelForCausalLM.from_pretrained(
+                "maya-research/Veena",
+                quantization_config=quantization_config,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+            # Move SNAC to GPU for faster decode
+            snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().cuda()
+        else:
+            print("⚠️  GPU NOT detected – falling back to CPU. This will be **very** slow and use ~12-16 GB system RAM.")
+
+            # Load the full-precision model on CPU (bitsandbytes requires CUDA)
+            model = AutoModelForCausalLM.from_pretrained(
+                "maya-research/Veena",
+                trust_remote_code=True,
+            ).to(torch.device("cpu"))
+
+            snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
+
         tokenizer = AutoTokenizer.from_pretrained("maya-research/Veena", trust_remote_code=True)
-        
-        # Initialize SNAC decoder
-        snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
-        if torch.cuda.is_available():
-            snac_model = snac_model.cuda()
         
         print("Models loaded successfully!")
 
