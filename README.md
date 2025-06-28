@@ -1,5 +1,9 @@
 # 🎵 Veena TTS - Gradio Web Interface
 
+![Image of gui](./img/image.png)
+
+> ⚠️ **Warning:** There is a known issue with the speakers – currently, only one or two voices work reliably. If you know how to fix this, please consider submitting a pull request!
+
 A beautiful and intuitive web interface for the **Veena Text-to-Speech model** developed by Maya Research. This Gradio application provides an easy-to-use interface for generating high-quality speech in Hindi, English, and code-mixed text.
 
 ## ✨ Features
@@ -16,7 +20,7 @@ A beautiful and intuitive web interface for the **Veena Text-to-Speech model** d
 
 ### Prerequisites
 
-#### mainly i tested in these idk about the others so try and let me know 💖
+#### Mainly i tested in these idk about the others so try and let me know 💖
 
 | Requirement                  | Recommended Version                                                         |
 | ---------------------------- | --------------------------------------------------------------------------- |
