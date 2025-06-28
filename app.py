@@ -22,10 +22,11 @@ START_OF_AI_TOKEN = 128261
 END_OF_AI_TOKEN = 128262
 AUDIO_CODE_BASE_OFFSET = 128266
 
-# Available speakers with descriptions
+# Official speakers from Veena model documentation
+# Only 4 distinct voices were trained with sufficient data (15,000+ utterances each)
 SPEAKERS = {
     "kavya": "🎭 Kavya - Expressive female voice",
-    "agastya": "🎯 Agastya - Clear male voice", 
+    "agastya": "🎯 Agastya - Sage male voice", 
     "maitri": "💫 Maitri - Friendly female voice",
     "vinaya": "🎪 Vinaya - Warm male voice"
 }
@@ -101,6 +102,77 @@ def decode_snac_tokens(snac_tokens, snac_model):
         audio_hat = snac_model.decode(hierarchical_codes)
 
     return audio_hat.squeeze().clamp(-1, 1).cpu().numpy()
+
+def test_speaker_tokens():
+    """Test function to verify speaker tokens are recognized"""
+    load_models()
+    
+    # All speakers from SPEAKERS dictionary (matches special_tokens_map.json)
+    all_speakers = list(SPEAKERS.keys())
+    
+    test_results = ["🔍 TESTING ALL 4 OFFICIAL SPEAKER TOKENS:\n"]
+    
+    working_speakers = []
+    broken_speakers = []
+    
+    for speaker in all_speakers:
+        token = f"<spk_{speaker}>"
+        try:
+            tokens = tokenizer.encode(token, add_special_tokens=False)
+            decoded = tokenizer.decode(tokens)
+            
+            # Check if it's properly tokenized (should be a single special token)
+            if len(tokens) == 1 and decoded.strip() == token:
+                status = "✅ GOOD TOKENIZATION"
+                working_speakers.append(speaker)
+            else:
+                status = "⚠️ POOR TOKENIZATION" 
+                broken_speakers.append(speaker)
+                
+            test_results.append(f"{status} {speaker}: {token} -> tokens: {tokens} -> decoded: '{decoded}'")
+        except Exception as e:
+            test_results.append(f"❌ ERROR {speaker}: {token} -> ERROR: {str(e)}")
+            broken_speakers.append(speaker)
+    
+    test_results.extend([
+        f"\n📊 TOKENIZATION SUMMARY:",
+        f"✅ Good tokenization: {len(working_speakers)}/{len(all_speakers)} ({', '.join(working_speakers)})",
+        f"❌ Poor tokenization: {len(broken_speakers)}/{len(all_speakers)} ({', '.join(broken_speakers)})",
+        f"\n💡 All 4 speakers should have good tokenization - use 'Test All Speakers Audio' to compare voices!"
+    ])
+    
+    return "\n".join(test_results)
+
+def test_all_speakers_audio():
+    """Test audio generation with all speakers using a short phrase"""
+    test_text = "Hello, this is a test."
+    all_speakers = list(SPEAKERS.keys())  # Use all speakers from the dictionary
+    
+    results = ["🎵 TESTING AUDIO GENERATION FOR ALL 4 OFFICIAL SPEAKERS:\n"]
+    
+    working_count = 0
+    failed_count = 0
+    
+    for speaker in all_speakers:
+        try:
+            audio, status = generate_speech(test_text, speaker, progress=lambda x, desc="": None)
+            if audio is not None:
+                results.append(f"✅ {speaker}: Audio generated successfully")
+                working_count += 1
+            else:
+                results.append(f"❌ {speaker}: {status}")
+                failed_count += 1
+        except Exception as e:
+            results.append(f"❌ {speaker}: ERROR - {str(e)}")
+            failed_count += 1
+    
+    results.extend([
+        f"\n📊 SUMMARY:",
+        f"✅ Working: {working_count}/{len(all_speakers)} speakers",
+        f"❌ Failed: {failed_count}/{len(all_speakers)} speakers",
+        f"\n💡 All 4 speakers are officially trained - compare the different voices!"
+    ])
+    return "\n".join(results)
 
 def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=gr.Progress()):
     """Generate speech from text using specified speaker voice"""
@@ -229,6 +301,15 @@ custom_css = """
     font-size: 0.9rem;
     color: #6c757d;
 }
+.warning-notice {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    color: #856404;
+    font-size: 0.9rem;
+}
 """
 
 # Create the Gradio interface
@@ -270,6 +351,13 @@ def create_interface():
                     value="kavya",
                     elem_classes=["speaker-radio"]
                 )
+                
+                # Important notice about speakers
+                gr.Markdown("""
+                **✅ Speaker Info:** Model includes **4 official voices** trained with 15,000+ utterances each. 
+                All speakers (**kavya**, **agastya**, **maitri**, **vinaya**) are officially supported by Maya Research.
+                Use the debug tools below to test and compare the different voices.
+                """, elem_classes=["warning-notice"])
             
             with gr.Column(scale=1):
                 # Control panel
@@ -298,6 +386,20 @@ def create_interface():
                     variant="primary",
                     size="lg"
                 )
+                
+                # Debug section
+                gr.Markdown("### 🔧 Debug Tools")
+                with gr.Row():
+                    test_tokens_btn = gr.Button(
+                        "🧪 Test Speaker Tokens",
+                        variant="secondary",
+                        size="sm"
+                    )
+                    test_audio_btn = gr.Button(
+                        "🎵 Test All Speakers Audio",
+                        variant="secondary", 
+                        size="sm"
+                    )
         
         # Output section
         with gr.Row():
@@ -313,6 +415,14 @@ def create_interface():
                     interactive=False,
                     lines=2
                 )
+                
+                debug_output = gr.Textbox(
+                    label="🔧 Debug Output",
+                    interactive=False,
+                    lines=6,
+                    visible=True,  # Show by default for debugging
+                    value="🎭 Default speaker: kavya (Click 'Test Speaker Tokens' to verify tokenization)"
+                )
         
         # Set up example button callbacks
         for btn, text in example_buttons:
@@ -325,17 +435,47 @@ def create_interface():
             outputs=[audio_output, status_output]
         )
         
+        # Set up debug tools
+        def show_debug_and_test():
+            result = test_speaker_tokens()
+            return result
+            
+        def debug_speaker_selection(selected_speaker):
+            debug_info = f"🎭 Radio button value: '{selected_speaker}'\n"
+            debug_info += f"🎭 Type: {type(selected_speaker)}\n"
+            debug_info += f"🎭 Available options: {list(SPEAKERS.keys())}\n"
+            debug_info += f"🎭 Is valid? {'✅' if selected_speaker in SPEAKERS else '❌'}"
+            return debug_info
+            
+        test_tokens_btn.click(
+            fn=show_debug_and_test,
+            outputs=[debug_output]
+        )
+        
+        test_audio_btn.click(
+            fn=test_all_speakers_audio,
+            outputs=[debug_output]
+        )
+        
+        # Debug speaker selection when it changes
+        speaker_choice.change(
+            fn=debug_speaker_selection,
+            inputs=[speaker_choice],
+            outputs=[debug_output]
+        )
+        
         # Footer with information
         gr.HTML("""
         <div class="footer-info">
             <h3>🌟 About Veena TTS</h3>
             <p><strong>Architecture:</strong> 3B parameter Llama-based transformer | <strong>Audio Quality:</strong> 24kHz SNAC codec</p>
             <p><strong>Languages:</strong> Hindi, English, Code-mixed | <strong>Latency:</strong> Ultra-low sub-80ms on H100</p>
-            <p><strong>Voices:</strong> 4 distinct speakers with unique characteristics</p>
+            <p><strong>Voices:</strong> 4 official speakers (all professionally trained)</p>
+            <p><strong>Speakers:</strong> kavya (female), agastya (male), maitri (female), vinaya (male)</p>
             <br>
             <p>🔗 <a href="https://huggingface.co/maya-research/Veena" target="_blank">Model Hub</a> | 
                📄 <a href="https://huggingface.co/maya-research/Veena/blob/main/README.md" target="_blank">Documentation</a> |
-               ⭐ <a href="https://github.com" target="_blank">Star on GitHub</a></p>
+               🧪 Use debug tools above to test all speakers</p>
         </div>
         """)
     
