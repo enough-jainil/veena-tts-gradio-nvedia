@@ -2,14 +2,12 @@
 
 ![Image of gui](./img/image.png)
 
-> ⚠️ **Warning:** There is a known issue with the speakers – currently, only one or two voices work reliably. If you know how to fix this, please consider submitting a pull request!
-
 A beautiful and intuitive web interface for the **Veena Text-to-Speech model** developed by Maya Research. This Gradio application provides an easy-to-use interface for generating high-quality speech in Hindi, English, and code-mixed text.
 
 ## ✨ Features
 
 - **🌍 Multi-lingual Support**: Hindi, English, and code-mixed text
-- **🎭 4 Distinct Voices**: Choose from Kavya, Agastya, Maitri, and Vinaya
+- **🎭 11 Distinct Voices**: Choose from multiple professionally trained speakers
 - **🎛️ Advanced Controls**: Adjust temperature and top-p for speech variation
 - **📱 Responsive UI**: Modern, mobile-friendly interface
 - **⚡ Real-time Generation**: Quick speech synthesis with progress tracking
@@ -58,12 +56,19 @@ On Linux/Windows the official PyTorch wheels already include the necessary CUDA 
 ### Basic Usage
 
 1. **Enter Text**: Type or paste your text in Hindi, English, or code-mixed format
-2. **Choose Voice**: Select from 4 available speakers:
+2. **Choose Voice**: Select from 11 available speakers:
 
    - 🎭 **Kavya** - Expressive female voice
-   - 🎯 **Agastya** - Clear male voice
-   - 💫 **Maitri** - Friendly female voice
+   - ✨ **Apsara** - Celestial female voice
+   - 🎯 **Agastya** - Sage male voice
    - 🎪 **Vinaya** - Warm male voice
+   - 💫 **Maitri** - Friendly female voice
+   - 🌸 **Charu** - Graceful female voice
+   - 🏔️ **Ishana** - Noble male voice
+   - 🌟 **Kyra** - Bright female voice
+   - 🎨 **Mohini** - Enchanting female voice
+   - 🌊 **Varun** - Strong male voice
+   - 🌙 **Soumya** - Gentle unisex voice
 
 3. **Adjust Settings** (optional):
 

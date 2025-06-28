@@ -6,12 +6,44 @@ import soundfile as sf
 import numpy as np
 import tempfile
 import os
+import atexit
 from datetime import datetime
+import time
 
 # Global variables for model components
 model = None
 tokenizer = None
 snac_model = None
+
+# List to keep track of temporary files for cleanup
+temp_files = []
+
+def cleanup_temp_files():
+    """Clean up temporary audio files"""
+    global temp_files
+    for file_path in temp_files:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except:
+            pass
+    temp_files.clear()
+
+def periodic_cleanup():
+    """Clean up old temporary files (keep only the last 5)"""
+    global temp_files
+    if len(temp_files) > 5:
+        # Remove older files
+        for file_path in temp_files[:-5]:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except:
+                pass
+        temp_files = temp_files[-5:]
+
+# Register cleanup function to run on exit
+atexit.register(cleanup_temp_files)
 
 # Control token IDs (fixed for Veena)
 START_OF_SPEECH_TOKEN = 128257
@@ -23,12 +55,19 @@ END_OF_AI_TOKEN = 128262
 AUDIO_CODE_BASE_OFFSET = 128266
 
 # Official speakers from Veena model documentation
-# Only 4 distinct voices were trained with sufficient data (15,000+ utterances each)
+# Updated to match all available speakers in special_tokens_map.json
 SPEAKERS = {
     "kavya": "🎭 Kavya - Expressive female voice",
+    "apsara": "✨ Apsara - Celestial female voice",
     "agastya": "🎯 Agastya - Sage male voice", 
+    "vinaya": "🎪 Vinaya - Warm male voice",
     "maitri": "💫 Maitri - Friendly female voice",
-    "vinaya": "🎪 Vinaya - Warm male voice"
+    "charu": "🌸 Charu - Graceful female voice",
+    "ishana": "🏔️ Ishana - Noble male voice",
+    "kyra": "🌟 Kyra - Bright female voice",
+    "mohini": "🎨 Mohini - Enchanting female voice",
+    "varun": "🌊 Varun - Strong male voice",
+    "soumya": "🌙 Soumya - Gentle unisex voice"
 }
 
 def load_models():
@@ -50,7 +89,7 @@ def load_models():
             )
 
             model = AutoModelForCausalLM.from_pretrained(
-                "maya-research/Veena",
+                "maya-research/veena",
                 quantization_config=quantization_config,
                 device_map="auto",
                 trust_remote_code=True,
@@ -62,13 +101,13 @@ def load_models():
 
             # Load the full-precision model on CPU (bitsandbytes requires CUDA)
             model = AutoModelForCausalLM.from_pretrained(
-                "maya-research/Veena",
+                "maya-research/veena",
                 trust_remote_code=True,
             ).to(torch.device("cpu"))
 
             snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
 
-        tokenizer = AutoTokenizer.from_pretrained("maya-research/Veena", trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained("maya-research/veena", trust_remote_code=True)
         
         print("Models loaded successfully!")
 
@@ -128,7 +167,7 @@ def test_speaker_tokens():
     # All speakers from SPEAKERS dictionary (matches special_tokens_map.json)
     all_speakers = list(SPEAKERS.keys())
     
-    test_results = ["🔍 TESTING ALL 4 OFFICIAL SPEAKER TOKENS:\n"]
+    test_results = [f"🔍 TESTING ALL {len(all_speakers)} OFFICIAL SPEAKER TOKENS:\n"]
     
     working_speakers = []
     broken_speakers = []
@@ -156,7 +195,7 @@ def test_speaker_tokens():
         f"\n📊 TOKENIZATION SUMMARY:",
         f"✅ Good tokenization: {len(working_speakers)}/{len(all_speakers)} ({', '.join(working_speakers)})",
         f"❌ Poor tokenization: {len(broken_speakers)}/{len(all_speakers)} ({', '.join(broken_speakers)})",
-        f"\n💡 All 4 speakers should have good tokenization - use 'Test All Speakers Audio' to compare voices!"
+        f"\n💡 All {len(all_speakers)} speakers should have good tokenization - use 'Test All Speakers Audio' to compare voices!"
     ])
     
     return "\n".join(test_results)
@@ -166,7 +205,7 @@ def test_all_speakers_audio():
     test_text = "Hello, this is a test."
     all_speakers = list(SPEAKERS.keys())  # Use all speakers from the dictionary
     
-    results = ["🎵 TESTING AUDIO GENERATION FOR ALL 4 OFFICIAL SPEAKERS:\n"]
+    results = [f"🎵 TESTING AUDIO GENERATION FOR ALL {len(all_speakers)} OFFICIAL SPEAKERS:\n"]
     
     working_count = 0
     failed_count = 0
@@ -188,7 +227,7 @@ def test_all_speakers_audio():
         f"\n📊 SUMMARY:",
         f"✅ Working: {working_count}/{len(all_speakers)} speakers",
         f"❌ Failed: {failed_count}/{len(all_speakers)} speakers",
-        f"\n💡 All 4 speakers are officially trained - compare the different voices!"
+        f"\n💡 All {len(all_speakers)} speakers are officially supported - compare the different voices!"
     ])
     return "\n".join(results)
 
@@ -264,14 +303,39 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
         if audio is None:
             return None, "❌ Failed to decode audio tokens."
         
-        # Create temporary file for audio
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        temp_file = f"veena_output_{speaker}_{timestamp}.wav"
-        sf.write(temp_file, audio, 24000)
-        
-        progress(1.0, desc="Audio generated successfully!")
-        
-        return temp_file, f"✅ Audio generated successfully using {SPEAKERS[speaker]} voice!"
+        # Create temporary file for audio using proper temp file handling
+        try:
+            # Create a temporary file that will be accessible to Gradio
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav", prefix=f"veena_{speaker}_") as temp_file:
+                temp_filename = temp_file.name
+            
+            # Write audio to the temporary file
+            sf.write(temp_filename, audio, 24000)
+            
+            # Add to cleanup list
+            temp_files.append(temp_filename)
+            
+            # Periodic cleanup of old files
+            periodic_cleanup()
+            
+            # Small delay to ensure file is fully written
+            time.sleep(0.1)
+            
+            progress(1.0, desc="Audio generated successfully!")
+            
+            # Verify file exists and is readable
+            if not os.path.exists(temp_filename):
+                return None, "❌ Error: Generated audio file not found."
+            
+            # Get file size for verification
+            file_size = os.path.getsize(temp_filename)
+            print(f"🎵 Generated audio file: {temp_filename} ({file_size} bytes)")
+            
+            # Return the file path and success message
+            return temp_filename, f"✅ Audio generated successfully using {SPEAKERS[speaker]} voice! (File: {file_size} bytes)"
+            
+        except Exception as e:
+            return None, f"❌ Error saving audio file: {str(e)}"
         
     except Exception as e:
         return None, f"❌ Error generating speech: {str(e)}"
@@ -372,9 +436,8 @@ def create_interface():
                 
                 # Important notice about speakers
                 gr.Markdown("""
-                **✅ Speaker Info:** Model includes **4 official voices** trained with 15,000+ utterances each. 
-                All speakers (**kavya**, **agastya**, **maitri**, **vinaya**) are officially supported by Maya Research.
-                Use the debug tools below to test and compare the different voices.
+                **✅ Speaker Info:** Model includes **11 official voices** with diverse characteristics. 
+                All speakers are officially supported by Maya Research - use the debug tools below to test and compare the different voices.
                 """, elem_classes=["warning-notice"])
             
             with gr.Column(scale=1):
@@ -425,7 +488,9 @@ def create_interface():
                 audio_output = gr.Audio(
                     label="🔊 Generated Audio",
                     type="filepath",
-                    interactive=False
+                    interactive=False,
+                    show_download_button=True,
+                    show_share_button=False
                 )
                 
                 status_output = gr.Textbox(
@@ -439,16 +504,38 @@ def create_interface():
                     interactive=False,
                     lines=6,
                     visible=True,  # Show by default for debugging
-                    value="🎭 Default speaker: kavya (Click 'Test Speaker Tokens' to verify tokenization)"
+                    value="🎭 Default speaker: kavya (Click 'Test Speaker Tokens' to verify all 11 speakers)"
                 )
         
         # Set up example button callbacks
         for btn, text in example_buttons:
             btn.click(fn=lambda t=text: t, outputs=[text_input])
         
+        # Wrapper function for better error handling and UI updates
+        def generate_speech_wrapper(text, speaker, temperature, top_p, progress=gr.Progress()):
+            """Wrapper function to handle generation with better UI feedback"""
+            try:
+                print(f"🎭 Starting generation: speaker={speaker}, text_length={len(text)}")
+                progress(0.1, desc="Starting generation...")
+                
+                # Call the actual generation function
+                result = generate_speech(text, speaker, temperature, top_p, progress)
+                
+                if result[0] is None:
+                    print(f"❌ Generation failed: {result[1]}")
+                    return None, result[1]
+                else:
+                    print(f"✅ Generation successful: {result[1]}")
+                    return result[0], result[1]
+                    
+            except Exception as e:
+                error_msg = f"❌ Wrapper error: {str(e)}"
+                print(error_msg)
+                return None, error_msg
+        
         # Set up generation
         generate_btn.click(
-            fn=generate_speech,
+            fn=generate_speech_wrapper,
             inputs=[text_input, speaker_choice, temperature, top_p],
             outputs=[audio_output, status_output]
         )
@@ -488,11 +575,11 @@ def create_interface():
             <h3>🌟 About Veena TTS</h3>
             <p><strong>Architecture:</strong> 3B parameter Llama-based transformer | <strong>Audio Quality:</strong> 24kHz SNAC codec</p>
             <p><strong>Languages:</strong> Hindi, English, Code-mixed | <strong>Latency:</strong> Ultra-low sub-80ms on H100</p>
-            <p><strong>Voices:</strong> 4 official speakers (all professionally trained)</p>
-            <p><strong>Speakers:</strong> kavya (female), agastya (male), maitri (female), vinaya (male)</p>
+            <p><strong>Voices:</strong> 11 official speakers with diverse characteristics</p>
+            <p><strong>Speakers:</strong> kavya, apsara, agastya, vinaya, maitri, charu, ishana, kyra, mohini, varun, soumya</p>
             <br>
-            <p>🔗 <a href="https://huggingface.co/maya-research/Veena" target="_blank">Model Hub</a> | 
-               📄 <a href="https://huggingface.co/maya-research/Veena/blob/main/README.md" target="_blank">Documentation</a> |
+            <p>🔗 <a href="https://huggingface.co/maya-research/veena-tts" target="_blank">Model Hub</a> | 
+               📄 <a href="https://huggingface.co/maya-research/veena-tts/blob/main/README.md" target="_blank">Documentation</a> |
                🧪 Use debug tools above to test all speakers</p>
         </div>
         """)
