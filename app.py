@@ -65,7 +65,15 @@ def load_models():
 def decode_snac_tokens(snac_tokens, snac_model):
     """De-interleave and decode SNAC tokens to audio"""
     if not snac_tokens or len(snac_tokens) % 7 != 0:
-        return None
+        # The model occasionally emits a few extra tokens that do not complete a full
+        # 7-token SNAC frame.  We can still decode valid audio by trimming the
+        # trailing incomplete chunk instead of failing outright.
+        remainder = len(snac_tokens) % 7
+        if remainder:
+            snac_tokens = snac_tokens[:-remainder]
+        # If nothing is left after trimming, give up.
+        if not snac_tokens:
+            return None
 
     # De-interleave tokens into 3 hierarchical levels
     codes_lvl = [[] for _ in range(3)]
@@ -92,9 +100,9 @@ def decode_snac_tokens(snac_tokens, snac_model):
     
     hierarchical_codes = []
     for lvl_codes in codes_lvl:
-        tensor = torch.tensor(lvl_codes, dtype=torch.int32, device=device).unsqueeze(0)
-        if torch.any((tensor < 0) | (tensor > 4095)):
-            raise ValueError("Invalid SNAC token values")
+        # Clamp any stray codes into the valid range instead of raising.
+        clamped = [max(0, min(4095, v)) for v in lvl_codes]
+        tensor = torch.tensor(clamped, dtype=torch.int32, device=device).unsqueeze(0)
         hierarchical_codes.append(tensor)
 
     # Decode with SNAC
