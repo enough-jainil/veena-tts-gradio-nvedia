@@ -9,4 +9,5 @@ soundfile>=0.12.1
 numpy>=1.21.0
 accelerate>=0.20.0
 scipy>=1.9.0
-librosa>=0.9.0 
+librosa>=0.9.0
+# sentencepiece - optional, will be auto-installed by transformers if needed 

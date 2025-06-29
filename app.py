@@ -18,6 +18,42 @@ snac_model = None
 # List to keep track of temporary files for cleanup
 temp_files = []
 
+def check_dependencies():
+    """Check if all required dependencies are available"""
+    missing_deps = []
+    
+    try:
+        import torch
+    except ImportError:
+        missing_deps.append("torch")
+    
+    try:
+        import transformers
+    except ImportError:
+        missing_deps.append("transformers")
+        
+    try:
+        import gradio
+    except ImportError:
+        missing_deps.append("gradio")
+        
+    try:
+        from snac import SNAC
+    except ImportError:
+        missing_deps.append("snac")
+        
+    try:
+        import soundfile
+    except ImportError:
+        missing_deps.append("soundfile")
+    
+    if missing_deps:
+        print(f"❌ Missing dependencies: {missing_deps}")
+        print("Please install them with: pip install -r requirements.txt")
+        return False
+    
+    return True
+
 def cleanup_temp_files():
     """Clean up temporary audio files"""
     global temp_files
@@ -54,14 +90,17 @@ START_OF_AI_TOKEN = 128261
 END_OF_AI_TOKEN = 128262
 AUDIO_CODE_BASE_OFFSET = 128266
 
-# Official speakers from Veena model documentation
-# Updated to match all available speakers in special_tokens_map.json
+# Available speaker voices from the Jupyter notebook
+speakers = ["kavya", "agastya", "maitri", "vinaya"]
+
+# Extended speakers from the model (keeping the fancy display names)
 SPEAKERS = {
     "kavya": "🎭 Kavya - Expressive female voice",
-    "apsara": "✨ Apsara - Celestial female voice",
     "agastya": "🎯 Agastya - Sage male voice", 
-    "vinaya": "🎪 Vinaya - Warm male voice",
     "maitri": "💫 Maitri - Friendly female voice",
+    "vinaya": "🎪 Vinaya - Warm male voice",
+    # Additional speakers (if available in the model)
+    "apsara": "✨ Apsara - Celestial female voice",
     "charu": "🌸 Charu - Graceful female voice",
     "ishana": "🏔️ Ishana - Noble male voice",
     "kyra": "🌟 Kyra - Bright female voice",
@@ -77,88 +116,159 @@ def load_models():
     if model is None:
         print("Loading Veena TTS model...")
         
-        has_gpu = torch.cuda.is_available()
+        try:
+            has_gpu = torch.cuda.is_available()
 
-        if has_gpu:
-            # Model configuration for fast 4-bit GPU inference
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.bfloat16,
-                bnb_4bit_use_double_quant=True,
-            )
+            if has_gpu:
+                print("✅ CUDA available, loading quantized model...")
+                # Model configuration for fast 4-bit GPU inference
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                )
 
-            model = AutoModelForCausalLM.from_pretrained(
-                "maya-research/veena",
-                quantization_config=quantization_config,
-                device_map="auto",
-                trust_remote_code=True,
-            )
-            # Move SNAC to GPU for faster decode
-            snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().cuda()
-        else:
-            print("⚠️  GPU NOT detected – falling back to CPU. This will be **very** slow and use ~12-16 GB system RAM.")
+                model = AutoModelForCausalLM.from_pretrained(
+                    "maya-research/veena-tts",
+                    quantization_config=quantization_config,
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+                # Move SNAC to GPU for faster decode
+                snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").cuda()
+            else:
+                print("⚠️  No CUDA - loading CPU model (will be slow)...")
 
-            # Load the full-precision model on CPU (bitsandbytes requires CUDA)
-            model = AutoModelForCausalLM.from_pretrained(
-                "maya-research/veena",
-                trust_remote_code=True,
-            ).to(torch.device("cpu"))
+                # Load the full-precision model on CPU (bitsandbytes requires CUDA)
+                model = AutoModelForCausalLM.from_pretrained(
+                    "maya-research/veena-tts",
+                    trust_remote_code=True,
+                )
 
-            snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
+                snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz")
 
-        tokenizer = AutoTokenizer.from_pretrained("maya-research/veena", trust_remote_code=True)
-        
-        print("Models loaded successfully!")
+            print("📝 Loading tokenizer...")
+            tokenizer = AutoTokenizer.from_pretrained("maya-research/veena-tts", trust_remote_code=True)
+            
+            print("✅ Models loaded successfully!")
+            
+        except Exception as e:
+            print(f"❌ Error loading models: {e}")
+            print("\nTroubleshooting tips:")
+            print("1. Check your internet connection")
+            print("2. Make sure you have enough disk space")
+            print("3. Try running: python setup_windows.py")
+            raise e
 
 def decode_snac_tokens(snac_tokens, snac_model):
-    """De-interleave and decode SNAC tokens to audio"""
+    """De-interleave and decode SNAC tokens to audio - FIXED VERSION from Jupyter notebook"""
     if not snac_tokens or len(snac_tokens) % 7 != 0:
-        # The model occasionally emits a few extra tokens that do not complete a full
-        # 7-token SNAC frame.  We can still decode valid audio by trimming the
-        # trailing incomplete chunk instead of failing outright.
-        remainder = len(snac_tokens) % 7
-        if remainder:
-            snac_tokens = snac_tokens[:-remainder]
-        # If nothing is left after trimming, give up.
-        if not snac_tokens:
-            return None
+        return None
 
-    # De-interleave tokens into 3 hierarchical levels
+    # De-interleave tokens into 3 hierarchical levels (CORRECTED ORDER)
     codes_lvl = [[] for _ in range(3)]
     llm_codebook_offsets = [AUDIO_CODE_BASE_OFFSET + i * 4096 for i in range(7)]
 
     for i in range(0, len(snac_tokens), 7):
         # Level 0: Coarse (1 token)
         codes_lvl[0].append(snac_tokens[i] - llm_codebook_offsets[0])
-        # Level 1: Medium (2 tokens)
+        # Level 1: Medium (2 tokens) - FIXED ORDER
         codes_lvl[1].append(snac_tokens[i+1] - llm_codebook_offsets[1])
-        codes_lvl[1].append(snac_tokens[i+4] - llm_codebook_offsets[4])
-        # Level 2: Fine (4 tokens)
-        codes_lvl[2].append(snac_tokens[i+2] - llm_codebook_offsets[2])
-        codes_lvl[2].append(snac_tokens[i+3] - llm_codebook_offsets[3])
+        codes_lvl[1].append(snac_tokens[i+2] - llm_codebook_offsets[4])
+        # Level 2: Fine (4 tokens) - FIXED ORDER  
+        codes_lvl[2].append(snac_tokens[i+3] - llm_codebook_offsets[2])
+        codes_lvl[2].append(snac_tokens[i+4] - llm_codebook_offsets[3])
         codes_lvl[2].append(snac_tokens[i+5] - llm_codebook_offsets[5])
         codes_lvl[2].append(snac_tokens[i+6] - llm_codebook_offsets[6])
 
     # Convert to tensors for SNAC decoder
-    # Get device from SNAC model parameters
-    try:
-        device = next(snac_model.parameters()).device
-    except:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
     hierarchical_codes = []
     for lvl_codes in codes_lvl:
-        # Clamp any stray codes into the valid range instead of raising.
-        clamped = [max(0, min(4095, v)) for v in lvl_codes]
-        tensor = torch.tensor(clamped, dtype=torch.int32, device=device).unsqueeze(0)
+        tensor = torch.tensor(lvl_codes, dtype=torch.int32, device=snac_model.device).unsqueeze(0)
+        if torch.any((tensor < 0) | (tensor > 4095)):
+            raise ValueError("Invalid SNAC token values")
         hierarchical_codes.append(tensor)
 
     # Decode with SNAC
     with torch.no_grad():
         audio_hat = snac_model.decode(hierarchical_codes)
+    return audio_hat.squeeze().cpu().numpy()
 
-    return audio_hat.squeeze().clamp(-1, 1).cpu().numpy()
+def generate_speech_simple(text, speaker="kavya", temperature=0.4, top_p=0.9):
+    """Generate speech from text using the specified speaker voice - Simple version from Jupyter notebook"""
+    # Prepare input with speaker token
+    prompt = f"<|spk_{speaker}|> {text}"
+    prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False)
+
+    # Construct the full sequence
+    input_tokens = [
+        START_OF_HUMAN_TOKEN,
+        *prompt_tokens,
+        END_OF_HUMAN_TOKEN,
+        START_OF_AI_TOKEN,
+        START_OF_SPEECH_TOKEN
+    ]
+    input_ids = torch.tensor([input_tokens], device=model.device)
+
+    # Generate audio tokens
+    with torch.no_grad():
+        output = model.generate(
+            input_ids,
+            max_new_tokens=1024,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=1.05,
+            eos_token_id=[END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
+        )
+
+    # Extract SNAC tokens
+    generated_ids = output[0][len(input_tokens):].tolist()
+    snac_tokens = [token_id for token_id in generated_ids if AUDIO_CODE_BASE_OFFSET <= token_id < (AUDIO_CODE_BASE_OFFSET + 7 * 4096)]
+
+    if not snac_tokens:
+        raise ValueError("No audio tokens were generated.")
+
+    # Decode audio from SNAC tokens
+    audio = decode_snac_tokens(snac_tokens, snac_model)
+    return audio
+
+def generate_examples():
+    """Generate example audio files like in the Jupyter notebook"""
+    load_models()
+    
+    examples = [
+        ("Hindi", "बचपन की यादें हमेशा दिल के सबसे करीब होती हैं, खासकर जब वे गर्मियों की छुट्टियों से जुड़ी हों।", "kavya"),
+        ("English", "The rise of generative AI is transforming industries by enabling faster content creation and automation.", "agastya"),
+        ("Code-mixed", "अगर आपने अभी तक client को final proposal नहीं भेजा है, then please do it by evening.", "maitri"),
+        ("Formal", "According to the latest report, sustainable energy initiatives have gained significant momentum across urban regions.", "vinaya"),
+        ("Bollywood Hindi", "कभी-कभी ज़िन्दगी हमें वहाँ ले आती है जहाँ हमें अपने दिल की नहीं, दूसरों की खुशी के लिए जीना पड़ता है।", "kavya"),
+        ("Bollywood English", "They said love knows no borders, no religion, no boundaries — but the world isn't always ready to accept that truth.", "agastya")
+    ]
+    
+    results = []
+    
+    for name, text, speaker in examples:
+        try:
+            print(f"Generating {name} with {speaker}...")
+            audio = generate_speech_simple(text, speaker=speaker)
+            
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav", prefix=f"veena_{name.lower().replace(' ', '_')}_") as temp_file:
+                temp_filename = temp_file.name
+            
+            sf.write(temp_filename, audio, 24000)
+            temp_files.append(temp_filename)
+            
+            results.append((name, temp_filename, f"✅ Generated {name} successfully"))
+            print(f"Generated '{name}' -> {temp_filename}")
+            
+        except Exception as e:
+            results.append((name, None, f"❌ Error generating {name}: {str(e)}"))
+            print(f"Failed to generate {name}: {e}")
+    
+    return results
 
 def test_speaker_tokens():
     """Test function to verify speaker tokens are recognized"""
@@ -173,7 +283,7 @@ def test_speaker_tokens():
     broken_speakers = []
     
     for speaker in all_speakers:
-        token = f"<spk_{speaker}>"
+        token = f"<|spk_{speaker}|>"  # Fixed format
         try:
             tokens = tokenizer.encode(token, add_special_tokens=False)
             decoded = tokenizer.decode(tokens)
@@ -232,7 +342,7 @@ def test_all_speakers_audio():
     return "\n".join(results)
 
 def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=gr.Progress()):
-    """Generate speech from text using specified speaker voice"""
+    """Generate speech from text using specified speaker voice - Enhanced version"""
     
     if not text.strip():
         return None, "⚠️ Please enter some text to convert to speech."
@@ -247,8 +357,8 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
         print(f"🎭 DEBUG: Selected speaker = '{speaker}'")
         print(f"🎭 DEBUG: Available speakers = {list(SPEAKERS.keys())}")
         
-        # Prepare input with speaker token
-        prompt = f"<spk_{speaker}> {text}"
+        # Prepare input with speaker token - use correct format from Jupyter notebook
+        prompt = f"<|spk_{speaker}|> {text}"
         print(f"🎭 DEBUG: Full prompt = '{prompt}'")
         
         prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False)
@@ -266,11 +376,11 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
         input_ids = torch.tensor([input_tokens], device=model.device)
 
         # Calculate max tokens based on text length
-        max_tokens = min(int(len(text) * 1.3) * 7 + 21, 700)
+        max_tokens = min(int(len(text) * 1.3) * 7 + 21, 1024)  # Increased limit from notebook
         
         progress(0.5, desc="Generating audio tokens...")
 
-        # Generate audio tokens
+        # Generate audio tokens using settings from Jupyter notebook
         with torch.no_grad():
             output = model.generate(
                 input_ids,
@@ -279,7 +389,6 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
                 temperature=temperature,
                 top_p=top_p,
                 repetition_penalty=1.05,
-                pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=[END_OF_SPEECH_TOKEN, END_OF_AI_TOKEN]
             )
 
@@ -297,7 +406,7 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
 
         progress(0.9, desc="Decoding to audio...")
         
-        # Decode audio
+        # Decode audio using the fixed function
         audio = decode_snac_tokens(snac_tokens, snac_model)
         
         if audio is None:
@@ -332,7 +441,7 @@ def generate_speech(text, speaker="kavya", temperature=0.4, top_p=0.9, progress=
             print(f"🎵 Generated audio file: {temp_filename} ({file_size} bytes)")
             
             # Return the file path and success message
-            return temp_filename, f"✅ Audio generated successfully using {SPEAKERS[speaker]} voice! (File: {file_size} bytes)"
+            return temp_filename, f"✅ Audio generated successfully using {SPEAKERS[speaker]} voice! ({file_size} bytes, {len(snac_tokens)} tokens)"
             
         except Exception as e:
             return None, f"❌ Error saving audio file: {str(e)}"
@@ -481,6 +590,14 @@ def create_interface():
                         variant="secondary", 
                         size="sm"
                     )
+                
+                # Examples section
+                gr.Markdown("### 📚 Generate Examples")
+                generate_examples_btn = gr.Button(
+                    "🎭 Generate All Examples (Jupyter Notebook)",
+                    variant="primary",
+                    size="sm"
+                )
         
         # Output section
         with gr.Row():
@@ -559,6 +676,25 @@ def create_interface():
         
         test_audio_btn.click(
             fn=test_all_speakers_audio,
+            outputs=[debug_output]
+        )
+        
+        # Example generation functionality
+        def generate_examples_ui():
+            """Generate examples and return status"""
+            try:
+                results = generate_examples()
+                status_lines = []
+                for name, filepath, status in results:
+                    status_lines.append(f"{name}: {status}")
+                    if filepath:
+                        status_lines.append(f"  📁 {filepath}")
+                return "🎭 Example Generation Results:\n\n" + "\n".join(status_lines)
+            except Exception as e:
+                return f"❌ Error generating examples: {str(e)}"
+        
+        generate_examples_btn.click(
+            fn=generate_examples_ui,
             outputs=[debug_output]
         )
         
